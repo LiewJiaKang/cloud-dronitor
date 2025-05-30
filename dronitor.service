@@ -1,0 +1,15 @@
+[Unit]
+Description=Dronitor API Service
+After=network.target
+
+[Service]
+User=Liew
+Group=Liew
+WorkingDirectory=/home/Liew/projects/cloud-dronitor
+Environment="PATH=/home/Liew/projects/cloud-dronitor/venv/bin"
+EnvironmentFile=/home/Liew/projects/cloud-dronitor/.env
+ExecStart=/home/Liew/projects/cloud-dronitor/venv/bin/gunicorn main:app -w 4 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000
+Restart=always
+
+[Install]
+WantedBy=multi-user.target 
