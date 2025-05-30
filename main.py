@@ -12,19 +12,34 @@ from dotenv import load_dotenv
 import secrets
 import aiofiles
 from pathlib import Path
+from contextlib import asynccontextmanager
 
 # Load environment variables
 load_dotenv()
 
+# Define data directory - use Render mount path if available
+DATA_DIR = Path(os.getenv("RENDER_MOUNT_PATH", "data"))
+DATA_DIR.mkdir(exist_ok=True)  # Ensure directory exists
+
 # Create FastAPI app
-app = FastAPI(title="Cloud Dronitor API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await init_db()
+    print(f"Server started. Use this API key for authentication: {list(API_KEYS)[0]}")
+    yield
+
+app = FastAPI(title="Cloud Dronitor API", lifespan=lifespan)
 
 # Database configuration
 DATABASE_URL = os.getenv("DATABASE_URL")
 if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
 
-engine = create_async_engine(DATABASE_URL or "sqlite+aiosqlite:///./dronitor.db")
+# Ensure database is stored in persistent data directory
+if not DATABASE_URL:
+    DATABASE_URL = f"sqlite+aiosqlite:///{DATA_DIR}/dronitor.db"
+
+engine = create_async_engine(DATABASE_URL)
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 Base = declarative_base()
 
@@ -68,11 +83,6 @@ async def verify_api_key(api_key: str = Security(api_key_header)):
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-
-@app.on_event("startup")
-async def startup_event():
-    await init_db()
-    print(f"Server started. Use this API key for authentication: {list(API_KEYS)[0]}")
 
 @app.post("/upload")
 async def upload_data(
