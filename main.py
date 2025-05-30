@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException, Security, status, File, Upl
 from fastapi.security import APIKeyHeader
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy import Column, Float, String, DateTime, select
+from sqlalchemy import Column, Float, String, DateTime, select, Text
 from datetime import datetime
 from typing import List, Optional
 import csv
@@ -20,15 +20,11 @@ load_dotenv()
 app = FastAPI(title="Cloud Dronitor API")
 
 # Database configuration
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./dronitor.db")
-SECRET_KEY = os.getenv("SECRET_KEY", secrets.token_urlsafe(32))
-ALGORITHM = os.getenv("ALGORITHM", "HS256")
+DATABASE_URL = os.getenv("DATABASE_URL")
+if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
 
-# Create data directory for file storage
-DATA_DIR = Path("drone_data")
-DATA_DIR.mkdir(exist_ok=True)
-
-engine = create_async_engine(DATABASE_URL)
+engine = create_async_engine(DATABASE_URL or "sqlite+aiosqlite:///./dronitor.db")
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 Base = declarative_base()
 
@@ -52,6 +48,7 @@ class DroneReading(Base):
     latitude = Column(Float)
     aqi = Column(Float)
     timestamp = Column(DateTime, default=datetime.utcnow)
+    raw_data = Column(Text, nullable=True)  # Store raw data in database
 
 # Database dependency
 async def get_db():
@@ -77,18 +74,6 @@ async def startup_event():
     await init_db()
     print(f"Server started. Use this API key for authentication: {list(API_KEYS)[0]}")
 
-async def save_to_file(reading: DroneReading):
-    """Save reading to a date-based file"""
-    date_str = reading.timestamp.strftime("%Y-%m-%d")
-    file_path = DATA_DIR / f"{date_str}.csv"
-    
-    # Create the line to append
-    line = f"{reading.longitude},{reading.latitude},{reading.aqi},{reading.timestamp.isoformat()}\n"
-    
-    # Append to the file
-    async with aiofiles.open(file_path, mode='a') as f:
-        await f.write(line)
-
 @app.post("/upload")
 async def upload_data(
     file: UploadFile = File(...),
@@ -112,11 +97,10 @@ async def upload_data(
                 longitude=longitude,
                 latitude=latitude,
                 aqi=aqi,
-                timestamp=current_time
+                timestamp=current_time,
+                raw_data=",".join(row)  # Store raw data in database
             )
             readings.append(reading)
-            # Save to date-based file
-            await save_to_file(reading)
         except ValueError:
             continue
     
@@ -127,7 +111,6 @@ async def upload_data(
     return {"message": f"Successfully uploaded {len(readings)} readings"}
 
 @app.get("/readings", response_model=List[dict])
-@app.post("/readings", response_model=List[dict])  # Temporarily add POST to debug
 async def get_readings(
     request: Request,
     year: Optional[int] = Query(None, description="Filter by year"),
@@ -136,8 +119,8 @@ async def get_readings(
     db: AsyncSession = Depends(get_db),
     api_key: str = Depends(verify_api_key)
 ):
-    print(f"Request method: {request.method}")  # Debug print
-    print(f"Request URL: {request.url}")  # Debug print
+    print(f"Request method: {request.method}")
+    print(f"Request URL: {request.url}")
     
     # Start with a base query
     query = select(DroneReading).order_by(DroneReading.timestamp.desc())
@@ -171,7 +154,7 @@ async def get_readings(
     result = await db.execute(query)
     readings = result.scalars().all()
     
-    print(f"Found {len(readings)} readings")  # Debug print
+    print(f"Found {len(readings)} readings")
     
     if not readings:
         return []
@@ -181,7 +164,8 @@ async def get_readings(
             "longitude": reading.longitude,
             "latitude": reading.latitude,
             "aqi": reading.aqi,
-            "timestamp": reading.timestamp.isoformat()
+            "timestamp": reading.timestamp.isoformat(),
+            "raw_data": reading.raw_data
         }
         for reading in readings
     ]

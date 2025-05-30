@@ -10,4 +10,10 @@ services:
       - key: SECRET_KEY
         generateValue: true
       - key: DATABASE_URL
-        sync: false 
+        fromDatabase:
+          name: dronitor-db
+          property: connectionString
+
+databases:
+  - name: dronitor-db
+    plan: free 
