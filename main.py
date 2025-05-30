@@ -83,7 +83,11 @@ async def verify_api_key(api_key: str = Security(api_key_header)):
 # Create tables
 async def init_db():
     async with engine.begin() as conn:
+        # Drop all tables
+        await conn.run_sync(Base.metadata.drop_all)
+        # Create all tables
         await conn.run_sync(Base.metadata.create_all)
+        print("Database tables recreated successfully")
 
 @app.post("/upload")
 async def upload_data(
@@ -132,54 +136,61 @@ async def get_readings(
 ):
     print(f"Request method: {request.method}")
     print(f"Request URL: {request.url}")
+    print(f"Date filters - Year: {year}, Month: {month}, Day: {day}")
     
-    # Start with a base query
-    query = select(DroneReading).order_by(DroneReading.timestamp.desc())
-    
-    # Apply date filters only if year is provided
-    if year is not None:
-        if month is not None:
-            if day is not None:
-                # Filter by specific date
-                start_date = datetime(year, month, day)
-                end_date = datetime(year, month, day, 23, 59, 59)
-            else:
-                # Filter by month
-                if month == 12:
-                    next_year = year + 1
-                    next_month = 1
+    try:
+        # Start with a base query
+        query = select(DroneReading).order_by(DroneReading.timestamp.desc())
+        
+        # Apply date filters only if year is provided
+        if year is not None:
+            if month is not None:
+                if day is not None:
+                    # Filter by specific date
+                    start_date = datetime(year, month, day)
+                    end_date = datetime(year, month, day, 23, 59, 59)
                 else:
-                    next_year = year
-                    next_month = month + 1
-                start_date = datetime(year, month, 1)
-                end_date = datetime(next_year, next_month, 1)
-        else:
-            # Filter by year
-            start_date = datetime(year, 1, 1)
-            end_date = datetime(year + 1, 1, 1)
-            
-        query = query.where(DroneReading.timestamp >= start_date, 
-                          DroneReading.timestamp < end_date)
-    
-    # Execute query and get results
-    result = await db.execute(query)
-    readings = result.scalars().all()
-    
-    print(f"Found {len(readings)} readings")
-    
-    if not readings:
-        return []
-    
-    return [
-        {
-            "longitude": reading.longitude,
-            "latitude": reading.latitude,
-            "aqi": reading.aqi,
-            "timestamp": reading.timestamp.isoformat(),
-            "raw_data": reading.raw_data
-        }
-        for reading in readings
-    ]
+                    # Filter by month
+                    if month == 12:
+                        next_year = year + 1
+                        next_month = 1
+                    else:
+                        next_year = year
+                        next_month = month + 1
+                    start_date = datetime(year, month, 1)
+                    end_date = datetime(next_year, next_month, 1)
+            else:
+                # Filter by year
+                start_date = datetime(year, 1, 1)
+                end_date = datetime(year + 1, 1, 1)
+                
+            query = query.where(DroneReading.timestamp >= start_date, 
+                              DroneReading.timestamp < end_date)
+            print(f"Date filter applied: {start_date} to {end_date}")
+        
+        # Execute query and get results
+        print("Executing query...")
+        result = await db.execute(query)
+        readings = result.scalars().all()
+        
+        print(f"Found {len(readings)} readings")
+        
+        if not readings:
+            return []
+        
+        return [
+            {
+                "longitude": reading.longitude,
+                "latitude": reading.latitude,
+                "aqi": reading.aqi,
+                "timestamp": reading.timestamp.isoformat(),
+                "raw_data": reading.raw_data
+            }
+            for reading in readings
+        ]
+    except Exception as e:
+        print(f"Error in get_readings: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/files/{date}")
 async def get_file_data(
