@@ -10,7 +10,9 @@ services:
       sizeGB: 1
     envVars:
       - key: DATABASE_URL
-        value: sqlite+aiosqlite:///data/dronitor.db
+        fromDatabase:
+          name: dronitor-db
+          property: connectionString
 
 databases:
   - name: dronitor-db

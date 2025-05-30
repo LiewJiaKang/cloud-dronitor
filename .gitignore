@@ -45,4 +45,9 @@ log/
 .DS_Store
 
 # Project specific
-drone_data/ 
+drone_data/
+
+# New additions
+.pytest_cache/
+.coverage
+htmlcov/ 
